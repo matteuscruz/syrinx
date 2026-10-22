@@ -38,6 +38,34 @@
         }
         #bird-name { font-size: 9px; color: #555; margin-top: 5px; letter-spacing: 1px; text-transform: uppercase; }
         #bird-latin { font-size: 8px; color: #333; font-style: italic; text-transform: none; }
+        #ref-btn {
+            position: absolute; top: 20px; right: 20px; z-index: 20;
+            background: transparent; color: #2a2a2a; border: 1px solid #1a1a1a;
+            padding: 6px 12px; font-size: 8px; letter-spacing: 2px;
+            cursor: pointer; pointer-events: auto; font-family: inherit;
+            text-transform: uppercase; transition: color 0.3s, border-color 0.3s;
+        }
+        #ref-btn:hover { background: transparent !important; color: #555 !important; border-color: #333; }
+        #ref-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.93);
+            z-index: 100; display: none; align-items: center; justify-content: center;
+        }
+        #ref-overlay.open { display: flex; }
+        #ref-panel {
+            max-width: 660px; width: 90%; padding: 44px 48px;
+            border: 1px solid #111; background: #030303; position: relative;
+        }
+        #ref-panel h2 { font-size: 9px; letter-spacing: 3px; color: #2a2a2a; margin: 0 0 32px; text-transform: uppercase; }
+        .ref-item { margin-bottom: 28px; padding-bottom: 28px; border-bottom: 1px solid #0a0a0a; }
+        .ref-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .ref-tag { font-size: 7px; color: #1e1e1e; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 7px; }
+        .ref-authors { font-size: 10px; color: #444; margin-bottom: 5px; }
+        .ref-title { font-size: 11px; color: #666; font-style: italic; margin-bottom: 5px; line-height: 1.5; }
+        .ref-journal { font-size: 9px; color: #333; margin-bottom: 5px; }
+        .ref-doi a { font-size: 8px; color: #00ffff; opacity: 0.4; text-decoration: none; letter-spacing: 0.5px; }
+        .ref-doi a:hover { opacity: 0.9; }
+        #ref-close { position: absolute; top: 16px; right: 20px; background: transparent; border: none; color: #222; font-size: 20px; cursor: pointer; font-family: inherit; line-height: 1; }
+        #ref-close:hover { color: #555; }
         #mi-canvas {
             position: absolute; bottom: 20px; left: 20px; z-index: 10;
             pointer-events: none; border: 1px solid #222;
@@ -88,6 +116,55 @@
 <audio id="samplePlayer" crossorigin="anonymous" style="display:none;"></audio>
 <canvas id="mi-canvas" width="260" height="140"></canvas>
 <div class="bout-flash" id="boutFlash"></div>
+
+<button id="ref-btn">References</button>
+
+<div id="ref-overlay">
+    <div id="ref-panel">
+        <button id="ref-close">×</button>
+        <h2>Scientific References</h2>
+
+        <div class="ref-item">
+            <div class="ref-tag">Primary · Sequential Organization</div>
+            <div class="ref-authors">Sainburg, T., Theilman, B., Thielk, M. &amp; Gentner, T. Q.</div>
+            <div class="ref-title">Parallels in the sequential organization of birdsong and human speech</div>
+            <div class="ref-journal">Nature Communications, 10, 3636 (2019)</div>
+            <div class="ref-doi"><a href="https://doi.org/10.1038/s41467-019-11605-y" target="_blank">doi:10.1038/s41467-019-11605-y</a></div>
+        </div>
+
+        <div class="ref-item">
+            <div class="ref-tag">Feature Extraction · MFCCs</div>
+            <div class="ref-authors">Davis, S. &amp; Mermelstein, P.</div>
+            <div class="ref-title">Comparison of parametric representations for monosyllabic word recognition in continuously spoken sentences</div>
+            <div class="ref-journal">IEEE Transactions on Acoustics, Speech, and Signal Processing, 28(4), 357–366 (1980)</div>
+            <div class="ref-doi"><a href="https://doi.org/10.1109/TASSP.1980.1163420" target="_blank">doi:10.1109/TASSP.1980.1163420</a></div>
+        </div>
+
+        <div class="ref-item">
+            <div class="ref-tag">Dimensionality Reduction · Manifold</div>
+            <div class="ref-authors">McInnes, L., Healy, J. &amp; Melville, J.</div>
+            <div class="ref-title">UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction</div>
+            <div class="ref-journal">arXiv:1802.03426 (2018)</div>
+            <div class="ref-doi"><a href="https://arxiv.org/abs/1802.03426" target="_blank">arxiv:1802.03426</a></div>
+        </div>
+
+        <div class="ref-item">
+            <div class="ref-tag">Information Theory · Mutual Information</div>
+            <div class="ref-authors">Shannon, C. E.</div>
+            <div class="ref-title">A mathematical theory of communication</div>
+            <div class="ref-journal">Bell System Technical Journal, 27(3), 379–423 (1948)</div>
+            <div class="ref-doi"><a href="https://doi.org/10.1002/j.1538-7305.1948.tb01338.x" target="_blank">doi:10.1002/j.1538-7305.1948.tb01338.x</a></div>
+        </div>
+
+        <div class="ref-item">
+            <div class="ref-tag">Psychoacoustics · Mel Scale</div>
+            <div class="ref-authors">Stevens, S. S., Volkmann, J. &amp; Newman, E. B.</div>
+            <div class="ref-title">A scale for the measurement of the psychological magnitude pitch</div>
+            <div class="ref-journal">Journal of the Acoustical Society of America, 8(3), 185–190 (1937)</div>
+            <div class="ref-doi"><a href="https://doi.org/10.1121/1.1915893" target="_blank">doi:10.1121/1.1915893</a></div>
+        </div>
+    </div>
+</div>
 
 <div id="bird-panel">
     <img id="bird-photo" src="" alt="" />
@@ -825,6 +902,12 @@
         document.getElementById('bird-latin').innerText = d.latin;
         panel.classList.add('visible');
     }
+
+    const refOverlay = document.getElementById('ref-overlay');
+    document.getElementById('ref-btn').addEventListener('click', () => refOverlay.classList.add('open'));
+    document.getElementById('ref-close').addEventListener('click', () => refOverlay.classList.remove('open'));
+    refOverlay.addEventListener('click', e => { if (e.target === refOverlay) refOverlay.classList.remove('open'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') refOverlay.classList.remove('open'); });
 
     document.getElementById('startBtn').addEventListener('click', () => {
         document.getElementById('bird-panel').classList.remove('visible');
