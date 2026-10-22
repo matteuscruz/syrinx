@@ -3,39 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Musical Manifold: Restored Analysis</title>
+    <title>Acoustic Manifold — Sainburg et al. 2019</title>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', Courier, monospace; color: #fff; }
         #overlay { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; text-transform: uppercase; }
         .metric { font-size: 10px; margin-bottom: 5px; opacity: 0.5; }
+        .metric-header { font-size: 9px; color: #444; margin-bottom: 8px; letter-spacing: 1px; }
         .val { color: #00ffff; font-weight: bold; }
-        button { 
-            padding: 12px 24px; background: transparent; color: #fff; border: 1px solid #fff; 
+        button {
+            padding: 12px 24px; background: transparent; color: #fff; border: 1px solid #fff;
             cursor: pointer; pointer-events: auto; font-family: inherit; font-size: 10px;
             letter-spacing: 2px;
         }
         button:hover { background: #fff; color: #000; }
+        select {
+            padding: 10px; background: #000; color: #fff; border: 1px solid #555;
+            cursor: pointer; pointer-events: auto; font-family: inherit; font-size: 10px;
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+        #sampleControls { margin-top: 10px; display: flex; gap: 8px; }
         canvas { display: block; }
         #labels-hud { position: absolute; bottom: 20px; right: 20px; font-size: 9px; color: #666; text-align: right; pointer-events: none; line-height: 1.6; }
+        #mi-canvas {
+            position: absolute; bottom: 20px; left: 20px; z-index: 10;
+            pointer-events: none; border: 1px solid #222;
+            background: rgba(0,0,0,0.7); display: none;
+        }
+        .bout-flash {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px; height: 200px; border-radius: 50%;
+            border: 2px solid #ff6600; pointer-events: none;
+            z-index: 20; display: none;
+            animation: boutRing 0.6s ease-out forwards;
+        }
+        @keyframes boutRing {
+            0%   { opacity: 1; transform: translate(-50%,-50%) scale(0.5); }
+            100% { opacity: 0; transform: translate(-50%,-50%) scale(2.5); }
+        }
     </style>
 </head>
 <body>
 
 <div id="overlay">
     <button id="startBtn">Initiate Restored Manifold</button>
+    <div id="sampleControls">
+        <select id="sampleSelect" aria-label="Bird song sample">
+            <option value="samples/common-blackbird_XC1142786.wav">Common Blackbird</option>
+            <option value="samples/european-robin_XC1062223.mp3">European Robin</option>
+            <option value="samples/great-tit_XC1152300.wav">Great Tit</option>
+            <option value="samples/nightingale_XC1151832.wav">Common Nightingale</option>
+            <option value="samples/house-sparrow_XC1104607.wav">House Sparrow</option>
+        </select>
+        <button id="sampleBtn">Play Sample</button>
+    </div>
     <div id="metrics" style="display:none; margin-top: 20px;">
-        <div class="metric">STRIKE (FLUX): <span id="m_flux" class="val">0</span></div>
-        <div class="metric">TILT (MFCC 1): <span id="m_mfcc1" class="val">0</span></div>
-        <div class="metric">BEND (MFCC 2): <span id="m_mfcc2" class="val">0</span></div>
+        <div class="metric-header">— SAINBURG ET AL. 2019 —</div>
+        <div class="metric">SYLLABLE: <span id="m_syllable" class="val">0</span></div>
+        <div class="metric">BOUT: <span id="m_bout" class="val">0</span></div>
+        <div class="metric">SYLLABLES/BOUT: <span id="m_syl_in_bout" class="val">0</span></div>
+        <div class="metric">SYLLABLE STATE: <span id="m_syl_state" class="val">SILENCE</span></div>
+        <div class="metric">MFCC-1 (SPECTRAL TILT): <span id="m_mfcc1" class="val">0</span></div>
+        <div class="metric">MFCC-2 (FORMANT STRUCT): <span id="m_mfcc2" class="val">0</span></div>
         <div class="metric">ENERGY (RMS): <span id="m_rms" class="val">0</span></div>
-        <div class="metric" style="color: #f00;">SIGNAL: <span id="m_gate" class="val">LOW</span></div>
+        <div class="metric">SPECTRAL FLUX: <span id="m_flux" class="val">0</span></div>
+        <div class="metric">MI REGIME: <span id="m_regime" class="val">—</span></div>
     </div>
 </div>
 
+<audio id="samplePlayer" crossorigin="anonymous" style="display:none;"></audio>
+<canvas id="mi-canvas" width="260" height="140"></canvas>
+<div class="bout-flash" id="boutFlash"></div>
+
 <div id="labels-hud">
-    X: SPECTRAL TILT (BASSY vs BRIGHT)<br>
-    Y: TOP=STABLE NOTE, BOTTOM=RHYTHMIC STRIKE<br>
-    Z: TEXTURE IDENTITY (ADAPTIVE CURVATURE)
+    X: MFCC-1 · SPECTRAL TILT (BASS ↔ BRIGHT)<br>
+    Y: MFCC-2 · FORMANT STRUCTURE<br>
+    Z: MFCC-3 · SPECTRAL DETAIL / TEXTURE<br>
+    <span style="color:#444">Sainburg et al. (2019) Nat. Commun.</span>
 </div>
 
 <script type="importmap">
@@ -50,8 +94,13 @@
 <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
     let scene, camera, renderer, controls;
+    let composer, bloomPass;
     let audioCtx, analyser, dataArray, prevDataArray;
     let isRunning = false;
 
@@ -59,9 +108,15 @@
     const MAX_POINTS = 3000;
     const positions = new Float32Array(MAX_POINTS * 3);
     const colors = new Float32Array(MAX_POINTS * 3);
+    const baseColors = new Float32Array(MAX_POINTS * 3);
     const sizes = new Float32Array(MAX_POINTS);
     const timestamps = new Float32Array(MAX_POINTS);
-    
+
+    // Smooth trail (Catmull-Rom curve through the recent history)
+    const LINE_SEGMENTS = 400;
+    const curvePositions = new Float32Array((LINE_SEGMENTS + 1) * 3);
+    const curveColors = new Float32Array((LINE_SEGMENTS + 1) * 3);
+
     let lineGeometry, lineMesh;
     let pointGeometry, pointMesh;
 
@@ -71,8 +126,69 @@
     let features = { flux: 0, rms: 0 };
     const bounds = { xMin: -5, xMax: 5, yMin: -5, yMax: 5, zMin: -5, zMax: 5 };
 
-    // --- NOISE GATE CONFIGURATION ---
-    const NOISE_GATE = 0.1; 
+    const NOISE_GATE = 0.1;
+
+    // ─── SYLLABLE SEGMENTATION STATE ────────────────────────────────────────────
+    // State machine: SILENCE → ONSET → ACTIVE → OFFSET → SILENCE
+    // Aligns with the paper's discrete vocal element (syllable) analysis unit.
+    const SYL_STATE = { SILENCE: 0, ONSET: 1, ACTIVE: 2, OFFSET: 3 };
+    let sylState = SYL_STATE.SILENCE;
+
+    const ONSET_FLUX_THRESH = 0.8;
+    const ONSET_RMS_THRESH  = 0.12;
+    const OFFSET_RMS_THRESH = 0.08;
+    const OFFSET_SILENCE_MS = 100;
+
+    let prevRms = 0;
+    let offSilenceStart = 0;
+    let lastSylOffsetTime = 0;
+
+    let totalSyllableCount = 0;
+    let boutCount = 0;
+    let syllablesInCurrentBout = 0;
+    let currentSylMFCC = new Float32Array(13);
+
+    // ─── BOUT DETECTION ─────────────────────────────────────────────────────────
+    // Sainburg et al. define bouts by inter-syllable pause thresholds (200–500ms).
+    const BOUT_GAP_MS = 300;
+
+    // ─── SYLLABLE RING BUFFER (for MI-decay chart) ───────────────────────────────
+    // Stores MFCC snapshots at each syllable onset to compute sequential similarity.
+    const SYL_BUFFER_SIZE = 40;
+    const sylBuffer = [];
+    let sylBufferHead = 0;
+
+    // ─── DISCRETE SYLLABLE-ONSET POINTS ─────────────────────────────────────────
+    const MAX_SYL_POINTS = 400;
+    const sylPositions  = new Float32Array(MAX_SYL_POINTS * 3);
+    const sylColors     = new Float32Array(MAX_SYL_POINTS * 3);
+    const sylSizes      = new Float32Array(MAX_SYL_POINTS);
+    const sylTimestamps = new Float32Array(MAX_SYL_POINTS);
+    const sylBoutPos    = new Float32Array(MAX_SYL_POINTS);
+    let sylPointGeometry, sylPointMesh;
+
+    let pendingSyllablePoint = false;
+
+    // ─── MI-DECAY CHART ─────────────────────────────────────────────────────────
+    let miCanvas, miCtx;
+    let miSimilarities = new Float32Array(SYL_BUFFER_SIZE);
+
+    // ─── HSL UTILITY ────────────────────────────────────────────────────────────
+    function hslToRgb(h, s, l) {
+        let r, g, b;
+        if (s === 0) { r = g = b = l; } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1; if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q-p)*6*t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q-p)*(2/3-t)*6;
+                return p;
+            };
+            const q = l < 0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+            r = hue2rgb(p,q,h+1/3); g = hue2rgb(p,q,h); b = hue2rgb(p,q,h-1/3);
+        }
+        return [r, g, b];
+    }
 
     function init() {
         scene = new THREE.Scene();
@@ -82,36 +198,48 @@
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0.9;
         document.body.appendChild(renderer.domElement);
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
+        composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.25, 0.45);
+        composer.addPass(bloomPass);
+        composer.addPass(new OutputPass());
+
         const gridHelper = new THREE.GridHelper(1200, 40, 0x111111, 0x080808);
         gridHelper.position.y = -200;
         scene.add(gridHelper);
-        const axesHelper = new THREE.AxesHelper(400);
-        scene.add(axesHelper);
 
-        createLabel("SPECTRAL TILT (X)", new THREE.Vector3(450, 0, 0), "#ff4444");
-        createLabel("STRIKE / RHYTHM (Y)", new THREE.Vector3(0, 450, 0), "#44ff44");
-        createLabel("TEXTURE CURVATURE (Z)", new THREE.Vector3(0, 0, 450), "#4444ff");
+        // Axis labels aligned with MFCC scientific terminology
+        createLabel("MFCC-1: SPECTRAL TILT (X+)", new THREE.Vector3(450, 0, 0), "#ff4444");
+        createLabel("MFCC-2: FORMANT STRUCT (Y+)", new THREE.Vector3(0, 450, 0), "#44ff44");
+        createLabel("MFCC-3: SPECTRAL DETAIL (Z+)", new THREE.Vector3(0, 0, 450), "#4444ff");
 
-        // Negative Axis Lines
         const createAxisLine = (end, color) => {
             const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), end]);
             const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color }));
             scene.add(line);
         };
+        createAxisLine(new THREE.Vector3(400, 0, 0), 0x662222);
+        createAxisLine(new THREE.Vector3(0, 400, 0), 0x226622);
+        createAxisLine(new THREE.Vector3(0, 0, 400), 0x222266);
         createAxisLine(new THREE.Vector3(-400, 0, 0), 0x441111);
         createAxisLine(new THREE.Vector3(0, -200, 0), 0x114411);
         createAxisLine(new THREE.Vector3(0, 0, -400), 0x111144);
 
-        createLabel("DARK / BASSY (X-)", new THREE.Vector3(-450, 0, 0), "#882222");
-        createLabel("IMPACT / STRIKE (Y-)", new THREE.Vector3(0, -250, 0), "#228822");
-        createLabel("WIDE TEXTURE (Z-)", new THREE.Vector3(0, 0, -450), "#222288");
+        createLabel("MFCC-1 LOW / BASS (X-)", new THREE.Vector3(-450, 0, 0), "#882222");
+        createLabel("MFCC-2 LOW (Y-)",        new THREE.Vector3(0, -250, 0), "#228822");
+        createLabel("MFCC-3 LOW (Z-)",        new THREE.Vector3(0, 0, -450), "#222288");
 
         setupManifold();
         window.addEventListener('resize', onWindowResize);
+
+        miCanvas = document.getElementById('mi-canvas');
+        miCtx = miCanvas.getContext('2d');
     }
 
     function createLabel(text, position, color) {
@@ -129,9 +257,10 @@
 
     function setupManifold() {
         lineGeometry = new THREE.BufferGeometry();
-        lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        lineGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending });
+        lineGeometry.setAttribute('position', new THREE.BufferAttribute(curvePositions, 3));
+        lineGeometry.setAttribute('color', new THREE.BufferAttribute(curveColors, 3));
+        lineGeometry.setDrawRange(0, 0);
+        const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
         lineMesh = new THREE.Line(lineGeometry, lineMaterial);
         scene.add(lineMesh);
 
@@ -161,6 +290,37 @@
         });
         pointMesh = new THREE.Points(pointGeometry, pointMaterial);
         scene.add(pointMesh);
+
+        // Discrete syllable-onset point cloud — larger, ring-shaded dots
+        sylPointGeometry = new THREE.BufferGeometry();
+        sylPointGeometry.setAttribute('position', new THREE.BufferAttribute(sylPositions, 3));
+        sylPointGeometry.setAttribute('color',    new THREE.BufferAttribute(sylColors, 3));
+        sylPointGeometry.setAttribute('size',     new THREE.BufferAttribute(sylSizes, 1));
+        sylPointGeometry.setDrawRange(0, 0);
+        const sylMat = new THREE.ShaderMaterial({
+            vertexShader: `
+                attribute float size;
+                varying vec3 vColor;
+                void main() {
+                    vColor = color;
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    gl_PointSize = size * (400.0 / -mv.z);
+                    gl_Position = projectionMatrix * mv;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vColor;
+                void main() {
+                    float d = length(gl_PointCoord - vec2(0.5));
+                    if (d > 0.475) discard;
+                    float ring = smoothstep(0.35, 0.40, d) * smoothstep(0.475, 0.45, d);
+                    gl_FragColor = vec4(vColor * (0.6 + ring * 0.4), 1.0);
+                }
+            `,
+            vertexColors: true, transparent: true, blending: THREE.AdditiveBlending
+        });
+        sylPointMesh = new THREE.Points(sylPointGeometry, sylMat);
+        scene.add(sylPointMesh);
     }
 
     function createMelFilterBank(sampleRate, fftSize, numFilters = 26) {
@@ -196,21 +356,54 @@
         return output;
     }
 
+    let micStream = null;
+    let sampleSourceNode = null;
+    let audioReady = false;
+
+    function ensureAudioContext() {
+        if (audioCtx) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        prevDataArray = new Uint8Array(analyser.frequencyBinCount);
+        melFilterBank = createMelFilterBank(audioCtx.sampleRate, 1024);
+    }
+
+    function beginRun() {
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('metrics').style.display = 'block';
+        isRunning = true;
+        if (!audioReady) { audioReady = true; animate(); }
+    }
+
     async function startAudio() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 1024;
-            const source = audioCtx.createMediaStreamSource(stream);
-            source.connect(analyser);
-            dataArray = new Uint8Array(analyser.frequencyBinCount);
-            prevDataArray = new Uint8Array(analyser.frequencyBinCount);
-            melFilterBank = createMelFilterBank(audioCtx.sampleRate, 1024);
-            document.getElementById('startBtn').style.display = 'none';
-            document.getElementById('metrics').style.display = 'block';
-            isRunning = true;
-            animate();
+            ensureAudioContext();
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+            document.getElementById('samplePlayer').pause();
+            if (micStream) micStream.getTracks().forEach(t => t.stop());
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioCtx.createMediaStreamSource(micStream).connect(analyser);
+            beginRun();
+        } catch (err) { console.error(err); }
+    }
+
+    async function playSample(url) {
+        ensureAudioContext();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+        const audioEl = document.getElementById('samplePlayer');
+        if (!sampleSourceNode) {
+            sampleSourceNode = audioCtx.createMediaElementSource(audioEl);
+            sampleSourceNode.connect(analyser);
+            sampleSourceNode.connect(audioCtx.destination);
+        }
+        audioEl.src = url;
+        audioEl.loop = true;
+        try {
+            await audioEl.play();
+            beginRun();
         } catch (err) { console.error(err); }
     }
 
@@ -240,12 +433,179 @@
         document.getElementById('m_mfcc1').innerText = mfcc[1].toFixed(2);
         document.getElementById('m_mfcc2').innerText = mfcc[2].toFixed(2);
         document.getElementById('m_rms').innerText = features.rms.toFixed(4);
-        const gateUI = document.getElementById('m_gate');
-        if (features.rms > NOISE_GATE) {
-            gateUI.innerText = "ACTIVE"; gateUI.style.color = "#0f0";
-        } else {
-            gateUI.innerText = "GATED"; gateUI.style.color = "#f00";
+    }
+
+    // ─── SYLLABLE STATE MACHINE ───────────────────────────────────────────────
+    // Transitions: SILENCE → ONSET (flux spike + RMS rising) → ACTIVE → OFFSET → SILENCE
+    // On ONSET: captures MFCC snapshot, computes MI decay, flags manifold update.
+    function detectSyllable() {
+        const now = performance.now();
+        const rmsRising = features.rms > prevRms;
+
+        switch (sylState) {
+            case SYL_STATE.SILENCE:
+                if (features.rms > ONSET_RMS_THRESH && rmsRising && features.flux > ONSET_FLUX_THRESH) {
+                    sylState = SYL_STATE.ONSET;
+                    onSyllableOnset(now);
+                }
+                break;
+            case SYL_STATE.ONSET:
+                sylState = SYL_STATE.ACTIVE;
+                break;
+            case SYL_STATE.ACTIVE:
+                if (features.rms < OFFSET_RMS_THRESH) {
+                    sylState = SYL_STATE.OFFSET;
+                    offSilenceStart = now;
+                }
+                break;
+            case SYL_STATE.OFFSET:
+                if (features.rms >= OFFSET_RMS_THRESH) {
+                    sylState = SYL_STATE.ACTIVE;
+                } else if (now - offSilenceStart >= OFFSET_SILENCE_MS) {
+                    onSyllableOffset(now);
+                    sylState = SYL_STATE.SILENCE;
+                }
+                break;
         }
+
+        prevRms = features.rms;
+
+        const names  = ['SILENCE', 'ONSET', 'ACTIVE', 'OFFSET'];
+        const cols   = ['#666', '#ffaa00', '#00ff88', '#ff4444'];
+        const el = document.getElementById('m_syl_state');
+        el.innerText = names[sylState];
+        el.style.color = cols[sylState];
+    }
+
+    function onSyllableOnset(now) {
+        // Bout detection: inter-syllable gap > BOUT_GAP_MS defines a new bout
+        const gap = now - lastSylOffsetTime;
+        if (totalSyllableCount === 0 || gap > BOUT_GAP_MS) {
+            boutCount++;
+            syllablesInCurrentBout = 0;
+            triggerBoutFlash();
+        }
+
+        totalSyllableCount++;
+        syllablesInCurrentBout++;
+        currentSylMFCC.set(mfcc);
+
+        // Push MFCC snapshot into ring buffer
+        if (sylBuffer.length < SYL_BUFFER_SIZE) {
+            sylBuffer.push(new Float32Array(mfcc));
+        } else {
+            sylBufferHead = (sylBufferHead + 1) % SYL_BUFFER_SIZE;
+            sylBuffer[sylBufferHead] = new Float32Array(mfcc);
+        }
+
+        computeMISimilarities();
+
+        document.getElementById('m_syllable').innerText    = totalSyllableCount;
+        document.getElementById('m_bout').innerText        = boutCount;
+        document.getElementById('m_syl_in_bout').innerText = syllablesInCurrentBout;
+        updateMIRegimeLabel();
+
+        pendingSyllablePoint = true;
+    }
+
+    function onSyllableOffset(now) {
+        lastSylOffsetTime = now;
+    }
+
+    // Computes cosine similarity between current syllable and each k-th past syllable.
+    // Approximates the MI(k) decay curves shown in Sainburg et al. Fig. 4.
+    function computeMISimilarities() {
+        const n = sylBuffer.length;
+        miSimilarities.fill(0);
+        if (n < 2) return;
+        const cur = sylBuffer[sylBufferHead];
+        for (let k = 1; k < n; k++) {
+            const pastIdx = ((sylBufferHead - k) + SYL_BUFFER_SIZE) % SYL_BUFFER_SIZE;
+            miSimilarities[k - 1] = cosineSimilarity(cur, sylBuffer[pastIdx]);
+        }
+    }
+
+    function cosineSimilarity(a, b) {
+        // MFCC[0] is energy-like and dominates; use coefficients 1–12
+        let dot = 0, nA = 0, nB = 0;
+        for (let i = 1; i < 13; i++) {
+            dot += a[i] * b[i];
+            nA  += a[i] * a[i];
+            nB  += b[i] * b[i];
+        }
+        if (!nA || !nB) return 0;
+        return dot / (Math.sqrt(nA) * Math.sqrt(nB));
+    }
+
+    function updateMIRegimeLabel() {
+        const el = document.getElementById('m_regime');
+        // Paper's regime boundary: Markovian dominates k ≤ ~20, hierarchical k > 20
+        if (sylBuffer.length <= 1) {
+            el.innerText = '—'; el.style.color = '#666';
+        } else if (sylBuffer.length <= 20) {
+            el.innerText = `MARKOVIAN (k=${sylBuffer.length})`; el.style.color = '#00ffff';
+        } else {
+            el.innerText = `HIERARCHICAL (k=${sylBuffer.length})`; el.style.color = '#ff88ff';
+        }
+    }
+
+    function triggerBoutFlash() {
+        const el = document.getElementById('boutFlash');
+        el.style.display = 'none';
+        void el.offsetWidth; // force reflow to restart animation
+        el.style.borderColor = `hsl(${(boutCount * 47) % 360}, 100%, 60%)`;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 650);
+    }
+
+    // Renders the sequential similarity decay curve to the MI chart canvas.
+    // The orange dashed line at k=20 marks the Markovian/hierarchical regime boundary.
+    function drawMIChart() {
+        const n = sylBuffer.length - 1;
+        if (n < 2) return;
+
+        miCanvas.style.display = 'block';
+        const W = miCanvas.width, H = miCanvas.height;
+        miCtx.clearRect(0, 0, W, H);
+        miCtx.fillStyle = 'rgba(0,0,0,0.85)';
+        miCtx.fillRect(0, 0, W, H);
+
+        const PAD = { top: 18, right: 10, bottom: 24, left: 32 };
+        const cW = W - PAD.left - PAD.right;
+        const cH = H - PAD.top - PAD.bottom;
+
+        const logVal = v => (Math.log(Math.max(v, 1e-4)) - Math.log(1e-4)) / (Math.log(1) - Math.log(1e-4));
+
+        // Grid lines
+        miCtx.strokeStyle = '#222'; miCtx.lineWidth = 1;
+        for (let gx = 0; gx <= 4; gx++) {
+            const px = PAD.left + (gx / 4) * cW;
+            miCtx.beginPath(); miCtx.moveTo(px, PAD.top); miCtx.lineTo(px, PAD.top + cH); miCtx.stroke();
+        }
+
+        // Regime boundary at k=20
+        if (n >= 20) {
+            const bx = PAD.left + (20 / Math.min(n, SYL_BUFFER_SIZE - 1)) * cW;
+            miCtx.strokeStyle = '#ff6600'; miCtx.setLineDash([2, 3]);
+            miCtx.beginPath(); miCtx.moveTo(bx, PAD.top); miCtx.lineTo(bx, PAD.top + cH); miCtx.stroke();
+            miCtx.setLineDash([]);
+        }
+
+        // Similarity decay curve
+        miCtx.strokeStyle = '#00ffcc'; miCtx.lineWidth = 1.5; miCtx.beginPath();
+        for (let k = 1; k <= n; k++) {
+            const px = PAD.left + ((k - 1) / Math.max(n - 1, 1)) * cW;
+            const py = PAD.top + cH - logVal(miSimilarities[k - 1]) * cH;
+            if (k === 1) miCtx.moveTo(px, py); else miCtx.lineTo(px, py);
+        }
+        miCtx.stroke();
+
+        // Axis labels
+        miCtx.fillStyle = '#555'; miCtx.font = '8px Courier New';
+        miCtx.textAlign = 'left';   miCtx.fillText('MI(k)', PAD.left, PAD.top - 4);
+        miCtx.textAlign = 'center'; miCtx.fillText('k (seq. distance)', PAD.left + cW / 2, H - 4);
+        miCtx.fillStyle = '#333'; miCtx.font = '7px Courier New';
+        miCtx.textAlign = 'right';  miCtx.fillText('Sainburg 2019 Fig.4 proxy', W - 2, PAD.top - 4);
     }
 
     function updateManifold() {
@@ -257,14 +617,14 @@
             const tXMin = mfcc[1]-0.5; const tXMax = mfcc[1]+0.5;
             const tYMin = mfcc[2]-0.5; const tYMax = mfcc[2]+0.5;
             const tZMin = mfcc[3]-0.5; const tZMax = mfcc[3]+0.5;
-            
+
             if (mfcc[1] < bounds.xMin) bounds.xMin = mfcc[1]; else bounds.xMin = bounds.xMin * (1-smooth) + tXMin * smooth;
             if (mfcc[1] > bounds.xMax) bounds.xMax = mfcc[1]; else bounds.xMax = bounds.xMax * (1-smooth) + tXMax * smooth;
             if (mfcc[2] < bounds.yMin) bounds.yMin = mfcc[2]; else bounds.yMin = bounds.yMin * (1-smooth) + tYMin * smooth;
             if (mfcc[2] > bounds.yMax) bounds.yMax = mfcc[2]; else bounds.yMax = bounds.yMax * (1-smooth) + tYMax * smooth;
             if (mfcc[3] < bounds.zMin) bounds.zMin = mfcc[3]; else bounds.zMin = bounds.zMin * (1-smooth) + tZMin * smooth;
             if (mfcc[3] > bounds.zMax) bounds.zMax = mfcc[3]; else bounds.zMax = bounds.zMax * (1-smooth) + tZMax * smooth;
-            
+
             if (Math.abs(bounds.xMax - bounds.xMin) < 0.1) bounds.xMax = bounds.xMin + 1;
             if (Math.abs(bounds.yMax - bounds.yMin) < 0.1) bounds.yMax = bounds.yMin + 1;
             if (Math.abs(bounds.zMax - bounds.zMin) < 0.1) bounds.zMax = bounds.zMin + 1;
@@ -274,22 +634,70 @@
             const nz = (mfcc[3] - bounds.zMin) / (bounds.zMax - bounds.zMin);
 
             const x = (nx * 600) - 300;
-            const base_y = (ny * 300) - 50; 
-            const strike = Math.pow(features.flux / 10, 1.2) * 120; 
+            const base_y = (ny * 300) - 50;
+            const strike = Math.pow(features.flux / 10, 1.2) * 120;
             const y = base_y - strike;
             const z = (nz * 500) - 250;
 
+            // Continuous trail (every active frame)
             for (let i = MAX_POINTS - 1; i > 0; i--) {
-                positions[i*3] = positions[(i-1)*3];
+                positions[i*3]   = positions[(i-1)*3];
                 positions[i*3+1] = positions[(i-1)*3+1];
                 positions[i*3+2] = positions[(i-1)*3+2];
+                baseColors[i*3]   = baseColors[(i-1)*3];
+                baseColors[i*3+1] = baseColors[(i-1)*3+1];
+                baseColors[i*3+2] = baseColors[(i-1)*3+2];
                 sizes[i] = sizes[i-1];
                 timestamps[i] = timestamps[i-1];
             }
             positions[0] = x; positions[1] = Math.max(-200, y); positions[2] = z;
-            timestamps[0] = now; sizes[0] = 3.0 + (features.rms * 150);
+            timestamps[0] = now;
+            sizes[0] = 4.0 + (features.rms * 220);
+            baseColors[0] = 0.25 + nx * 0.75;
+            baseColors[1] = 0.25 + ny * 0.75;
+            baseColors[2] = 0.25 + nz * 0.75;
+
+            // Discrete syllable-onset point (only on detected onset event)
+            if (pendingSyllablePoint) {
+                pendingSyllablePoint = false;
+
+                for (let i = MAX_SYL_POINTS - 1; i > 0; i--) {
+                    sylPositions[i*3]   = sylPositions[(i-1)*3];
+                    sylPositions[i*3+1] = sylPositions[(i-1)*3+1];
+                    sylPositions[i*3+2] = sylPositions[(i-1)*3+2];
+                    sylColors[i*3]   = sylColors[(i-1)*3];
+                    sylColors[i*3+1] = sylColors[(i-1)*3+1];
+                    sylColors[i*3+2] = sylColors[(i-1)*3+2];
+                    sylSizes[i]      = sylSizes[i-1];
+                    sylTimestamps[i] = sylTimestamps[i-1];
+                    sylBoutPos[i]    = sylBoutPos[i-1];
+                }
+
+                sylPositions[0] = x;
+                sylPositions[1] = Math.max(-200, y);
+                sylPositions[2] = z;
+                sylTimestamps[0] = now;
+                // Position within bout normalized [0,1]: encodes sequential structure
+                sylBoutPos[0] = Math.min((syllablesInCurrentBout - 1) / 20, 1.0);
+
+                // Hue encodes both bout identity and position within the bout
+                const boutBaseHue = ((boutCount * 47) % 360) / 360;
+                const h = (boutBaseHue + sylBoutPos[0] * (120 / 360)) % 1.0;
+                const [r, g, b] = hslToRgb(h, 0.9, 0.65);
+                sylColors[0] = r; sylColors[1] = g; sylColors[2] = b;
+                sylSizes[0] = 12.0 + features.rms * 300;
+
+                drawMIChart();
+
+                const activeCount = Math.min(totalSyllableCount, MAX_SYL_POINTS);
+                sylPointGeometry.setDrawRange(0, activeCount);
+                sylPointGeometry.attributes.position.needsUpdate = true;
+                sylPointGeometry.attributes.color.needsUpdate    = true;
+                sylPointGeometry.attributes.size.needsUpdate     = true;
+            }
         }
 
+        // Fade trail points over 5 seconds
         for (let i = 0; i < MAX_POINTS; i++) {
             const ageSeconds = (now - timestamps[i]) / 1000;
             const fade = Math.max(0, 1.0 - (ageSeconds / 5.0));
@@ -297,40 +705,78 @@
                 colors[i*3] = colors[i*3+1] = colors[i*3+2] = 0;
                 sizes[i] = 0;
             } else {
-                if (i < 10 && active) {
-                    colors[i*3] = colors[i*3+1] = colors[i*3+2] = 1.0;
-                } else {
-                    const hue = Math.max(0, 0.5 - (ageSeconds / 5.0 * 1.5));
-                    const color = new THREE.Color().setHSL(hue, 1.0, 0.6 * fade);
-                    colors[i*3] = color.r; colors[i*3+1] = color.g; colors[i*3+2] = color.b;
-                }
+                const brightness = 0.3 + 0.7 * fade;
+                colors[i*3]   = baseColors[i*3]   * brightness;
+                colors[i*3+1] = baseColors[i*3+1] * brightness;
+                colors[i*3+2] = baseColors[i*3+2] * brightness;
             }
         }
 
-        lineGeometry.attributes.position.needsUpdate = true;
-        lineGeometry.attributes.color.needsUpdate = true;
+        // Fade syllable onset points over 20 seconds (persist longer than the trail)
+        for (let i = 0; i < MAX_SYL_POINTS; i++) {
+            if (!sylTimestamps[i]) continue;
+            const age = (now - sylTimestamps[i]) / 1000;
+            if (age > 20) {
+                sylColors[i*3] = sylColors[i*3+1] = sylColors[i*3+2] = 0;
+                sylSizes[i] = 0;
+            }
+        }
+
+        // Smooth the visible trail into a Catmull-Rom curve
+        let visibleCount = 0;
+        while (visibleCount < MAX_POINTS && timestamps[visibleCount] !== 0 && (now - timestamps[visibleCount]) / 1000 < 5.0) {
+            visibleCount++;
+        }
+
+        if (visibleCount >= 2) {
+            const controlPoints = new Array(visibleCount);
+            for (let i = 0; i < visibleCount; i++) {
+                controlPoints[i] = new THREE.Vector3(positions[i*3], positions[i*3+1], positions[i*3+2]);
+            }
+            const curve = new THREE.CatmullRomCurve3(controlPoints);
+            const samples = curve.getPoints(LINE_SEGMENTS);
+            for (let s = 0; s <= LINE_SEGMENTS; s++) {
+                const p = samples[s];
+                curvePositions[s*3] = p.x; curvePositions[s*3+1] = p.y; curvePositions[s*3+2] = p.z;
+                const rawIndex = Math.min(visibleCount - 1, Math.round((s / LINE_SEGMENTS) * (visibleCount - 1)));
+                curveColors[s*3]   = colors[rawIndex*3];
+                curveColors[s*3+1] = colors[rawIndex*3+1];
+                curveColors[s*3+2] = colors[rawIndex*3+2];
+            }
+            lineGeometry.setDrawRange(0, LINE_SEGMENTS + 1);
+        } else {
+            lineGeometry.setDrawRange(0, 0);
+        }
+
+        lineGeometry.attributes.position.needsUpdate  = true;
+        lineGeometry.attributes.color.needsUpdate     = true;
         pointGeometry.attributes.position.needsUpdate = true;
-        pointGeometry.attributes.color.needsUpdate = true;
-        pointGeometry.attributes.size.needsUpdate = true;
+        pointGeometry.attributes.color.needsUpdate    = true;
+        pointGeometry.attributes.size.needsUpdate     = true;
     }
 
     function animate() {
         requestAnimationFrame(animate);
         if (isRunning) {
             calculateDescriptors();
+            detectSyllable();
             updateManifold();
         }
         controls.update();
-        renderer.render(scene, camera);
+        composer.render();
     }
 
     function onWindowResize() {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        composer.setSize(window.innerWidth, window.innerHeight);
     }
 
     document.getElementById('startBtn').addEventListener('click', startAudio);
+    document.getElementById('sampleBtn').addEventListener('click', () => {
+        playSample(document.getElementById('sampleSelect').value);
+    });
     init();
 </script>
 </body>
